@@ -11,8 +11,9 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import Union, Optional, List, Dict, Any
 import re
+import locale
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Lucy"
 __email__ = "lucy@example.com"
 
@@ -35,8 +36,51 @@ __all__ = [
     "get_weekday",
     "is_weekend",
     "get_quarter",
-    "round_datetime"
+    "round_datetime",
+    # Chinese date support
+    "parse_chinese_date",
+    "format_chinese_date",
+    "to_unix_chinese",
+    "from_unix_chinese",
+    "get_chinese_weekday",
+    "get_chinese_month",
+    "convert_chinese_era",
+    "is_valid_chinese_date"
 ]
+
+# Chinese date mappings
+CHINESE_NUMBERS = {
+    '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+    '十': 10, '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15, '十六': 16, '十七': 17, 
+    '十八': 18, '十九': 19, '二十': 20, '二十一': 21, '二十二': 22, '二十三': 23, '二十四': 24,
+    '二十五': 25, '二十六': 26, '二十七': 27, '二十八': 28, '二十九': 29, '三十': 30, '三十一': 31
+}
+
+CHINESE_MONTHS = {
+    '一月': 1, '二月': 2, '三月': 3, '四月': 4, '五月': 5, '六月': 6,
+    '七月': 7, '八月': 8, '九月': 9, '十月': 10, '十一月': 11, '十二月': 12,
+    '正月': 1, '腊月': 12
+}
+
+CHINESE_WEEKDAYS = {
+    0: '星期一', 1: '星期二', 2: '星期三', 3: '星期四', 4: '星期五', 5: '星期六', 6: '星期日'
+}
+
+CHINESE_WEEKDAYS_SHORT = {
+    0: '周一', 1: '周二', 2: '周三', 3: '周四', 4: '周五', 5: '周六', 6: '周日'
+}
+
+MONTH_NAMES_CHINESE = {
+    1: '一月', 2: '二月', 3: '三月', 4: '四月', 5: '五月', 6: '六月',
+    7: '七月', 8: '八月', 9: '九月', 10: '十月', 11: '十一月', 12: '十二月'
+}
+
+# Chinese era mappings (simplified)
+CHINESE_ERAS = {
+    '民国': 1911,  # Republic of China era
+    '公元': 0,     # Common Era
+    '西元': 0      # Western Era
+}
 
 
 def to_unix(datetime_str: str, timezone_str: Optional[str] = None) -> int:
@@ -534,3 +578,418 @@ def round_datetime(datetime_str: str,
         raise ValueError(f"Invalid round_to value: {round_to}")
     
     return rounded.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# Chinese date support functions
+
+def _chinese_number_to_int(chinese_num: str) -> int:
+    """Convert Chinese number to integer."""
+    if chinese_num in CHINESE_NUMBERS:
+        return CHINESE_NUMBERS[chinese_num]
+    
+    # Handle year format like 二〇二一 (each character is a digit)
+    if len(chinese_num) >= 3 and all(c in ['零', '〇', '一', '二', '三', '四', '五', '六', '七', '八', '九'] for c in chinese_num):
+        result = 0
+        for char in chinese_num:
+            digit_map = {'零': 0, '〇': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+            if char in digit_map:
+                result = result * 10 + digit_map[char]
+        return result
+    
+    # Handle traditional Chinese numbers with 十
+    if '十' in chinese_num:
+        if chinese_num == '十':
+            return 10
+        elif chinese_num.startswith('十'):
+            # 十一, 十二, etc.
+            remainder = chinese_num[1:]
+            if remainder in CHINESE_NUMBERS:
+                return 10 + CHINESE_NUMBERS[remainder]
+        elif chinese_num.endswith('十'):
+            # 二十, 三十, etc.
+            prefix = chinese_num[:-1]
+            if prefix in CHINESE_NUMBERS:
+                return CHINESE_NUMBERS[prefix] * 10
+        else:
+            # 二十一, 三十五, etc.
+            parts = chinese_num.split('十')
+            if len(parts) == 2 and parts[0] in CHINESE_NUMBERS and parts[1] in CHINESE_NUMBERS:
+                return CHINESE_NUMBERS[parts[0]] * 10 + CHINESE_NUMBERS[parts[1]]
+    
+    # Try to parse as regular number
+    try:
+        return int(chinese_num)
+    except ValueError:
+        raise ValueError(f"Cannot convert Chinese number: {chinese_num}")
+
+
+def _int_to_chinese_number(num: int) -> str:
+    """Convert integer to Chinese number."""
+    if num == 0:
+        return '零'
+    
+    chinese_digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+    
+    if num < 10:
+        return chinese_digits[num]
+    elif num < 20:
+        if num == 10:
+            return '十'
+        else:
+            return '十' + chinese_digits[num - 10]
+    elif num < 100:
+        tens = num // 10
+        ones = num % 10
+        if ones == 0:
+            return chinese_digits[tens] + '十'
+        else:
+            return chinese_digits[tens] + '十' + chinese_digits[ones]
+    else:
+        # For larger numbers, use a more complex conversion
+        return str(num)  # Fallback to Arabic numerals
+
+
+def parse_chinese_date(chinese_date_str: str) -> Dict[str, Any]:
+    """
+    Parse Chinese date string and return detailed information.
+    
+    Args:
+        chinese_date_str (str): Chinese date string (e.g., "二〇二一年一月一日")
+        
+    Returns:
+        dict: Parsed date information
+        
+    Examples:
+        >>> parse_chinese_date("二〇二一年一月一日")
+        {'year': 2021, 'month': 1, 'day': 1, 'datetime': datetime(...)}
+        >>> parse_chinese_date("民国一一〇年三月十五日")
+        {'year': 2021, 'month': 3, 'day': 15, 'era': '民国', 'datetime': datetime(...)}
+    """
+    # Remove common punctuation and spaces
+    cleaned = chinese_date_str.strip().replace('，', '').replace('。', '').replace(' ', '')
+    
+    # Pattern for Chinese date formats
+    patterns = [
+        # 民国一一〇年三月十五日 (era patterns first)
+        r'(民国|公元|西元)([一二三四五六七八九十零〇]{1,4})年(正月|腊月|[一二三四五六七八九十]{1,2}月)([一二三四五六七八九十初]{1,3})日?',
+        # 二〇二一年正月初一 or 二〇二一年一月一日
+        r'([一二三四五六七八九零〇]{2,4})年(正月|腊月|[一二三四五六七八九十]{1,2}月)([一二三四五六七八九十初]{1,3})日?',
+        # 2021年1月1日 or 2021年一月一日
+        r'(\d{4})年(正月|腊月|[一二三四五六七八九十\d]{1,3}月)([一二三四五六七八九十初\d]{1,3})日?',
+        # 正月初一 (current year assumed)
+        r'(正月|腊月|[一二三四五六七八九十]{1,2}月)([一二三四五六七八九十初]{1,3})日?'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, cleaned)
+        if match:
+            groups = match.groups()
+            
+            if len(groups) == 3:  # Year, month, day
+                year_str, month_str, day_str = groups
+                era = None
+            elif len(groups) == 4:  # Era, year, month, day or just month, day
+                if groups[0] in CHINESE_ERAS:  # Era format
+                    era, year_str, month_str, day_str = groups
+                else:  # Year, month, day, extra
+                    year_str, month_str, day_str = groups[:3]
+                    era = None
+            elif len(groups) == 2:  # Month, day only
+                month_str, day_str = groups
+                year_str = str(datetime.now().year)
+                era = None
+            else:
+                continue
+            
+            try:
+                # Parse year
+                if era in CHINESE_ERAS:
+                    if era == '民国':
+                        roc_year = _chinese_number_to_int(year_str)
+                        year = 1911 + roc_year  # Convert ROC year to CE year
+                    else:
+                        year = _chinese_number_to_int(year_str)
+                else:
+                    year = _chinese_number_to_int(year_str)
+                
+                # Parse month
+                if month_str in CHINESE_MONTHS:
+                    month = CHINESE_MONTHS[month_str]
+                elif month_str.endswith('月'):
+                    month_part = month_str[:-1]
+                    if month_part in CHINESE_MONTHS:
+                        month = CHINESE_MONTHS[month_part]
+                    else:
+                        month = _chinese_number_to_int(month_part)
+                else:
+                    month = _chinese_number_to_int(month_str)
+                
+                # Parse day
+                if day_str.startswith('初'):
+                    # Handle 初一, 初二, etc.
+                    day_part = day_str[1:]
+                    if day_part == '':
+                        day = 1  # 初 alone means 1st
+                    else:
+                        day = _chinese_number_to_int(day_part)
+                else:
+                    day = _chinese_number_to_int(day_str)
+                
+                # Create datetime object
+                dt = datetime(year, month, day)
+                
+                return {
+                    'year': year,
+                    'month': month,
+                    'day': day,
+                    'era': era,
+                    'datetime': dt,
+                    'weekday': dt.weekday(),
+                    'weekday_chinese': CHINESE_WEEKDAYS[dt.weekday()],
+                    'month_chinese': MONTH_NAMES_CHINESE[month],
+                    'iso_format': dt.isoformat()
+                }
+                
+            except (ValueError, KeyError) as e:
+                continue
+    
+    raise ValueError(f"Cannot parse Chinese date: {chinese_date_str}")
+
+
+def format_chinese_date(datetime_obj: Union[datetime, str], 
+                       format_type: str = 'full',
+                       use_era: Optional[str] = None) -> str:
+    """
+    Format datetime as Chinese date string.
+    
+    Args:
+        datetime_obj (datetime|str): Datetime object or string
+        format_type (str): Format type ('full', 'short', 'traditional')
+        use_era (str, optional): Era to use ('民国', '公元', '西元')
+        
+    Returns:
+        str: Chinese formatted date string
+        
+    Examples:
+        >>> format_chinese_date(datetime(2021, 1, 1))
+        '二〇二一年一月一日'
+        >>> format_chinese_date("2021-01-01", "short")
+        '2021年1月1日'
+        >>> format_chinese_date("2021-01-01", use_era="民国")
+        '民国一一〇年一月一日'
+    """
+    if isinstance(datetime_obj, str):
+        dt = parser.parse(datetime_obj)
+    else:
+        dt = datetime_obj
+    
+    year = dt.year
+    month = dt.month
+    day = dt.day
+    
+    if use_era == '民国':
+        era_year = year - 1911
+        if format_type == 'full':
+            # Convert era year to Chinese format like 一一〇
+            era_chinese = ''
+            for digit in str(era_year):
+                era_chinese += ['〇', '一', '二', '三', '四', '五', '六', '七', '八', '九'][int(digit)]
+            year_str = '民国' + era_chinese + '年'
+        else:
+            year_str = f'民国{era_year}年'
+    elif use_era in ['公元', '西元']:
+        if format_type == 'full':
+            year_str = use_era + _int_to_chinese_number(year) + '年'
+        else:
+            year_str = f'{use_era}{year}年'
+    else:
+        if format_type == 'full':
+            # Convert year to Chinese characters
+            year_chinese = ''
+            for digit in str(year):
+                if digit == '0':
+                    year_chinese += '〇'
+                else:
+                    year_chinese += ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'][int(digit)]
+            year_str = year_chinese + '年'
+        elif format_type == 'short':
+            year_str = f'{year}年'
+        else:  # traditional
+            year_str = _int_to_chinese_number(year) + '年'
+    
+    if format_type == 'full':
+        month_str = MONTH_NAMES_CHINESE[month]
+        day_str = _int_to_chinese_number(day) + '日'
+    elif format_type == 'short':
+        month_str = f'{month}月'
+        day_str = f'{day}日'
+    else:  # traditional
+        month_str = MONTH_NAMES_CHINESE[month]
+        day_str = _int_to_chinese_number(day) + '日'
+    
+    return year_str + month_str + day_str
+
+
+def to_unix_chinese(chinese_date_str: str, timezone_str: Optional[str] = None) -> int:
+    """
+    Convert Chinese date string to Unix timestamp.
+    
+    Args:
+        chinese_date_str (str): Chinese date string
+        timezone_str (str, optional): Timezone string
+        
+    Returns:
+        int: Unix timestamp
+        
+    Examples:
+        >>> to_unix_chinese("二〇二一年一月一日")
+        1609459200
+        >>> to_unix_chinese("民国一一〇年一月一日")
+        1609459200
+    """
+    parsed = parse_chinese_date(chinese_date_str)
+    dt = parsed['datetime']
+    
+    if timezone_str:
+        import pytz
+        tz = pytz.timezone(timezone_str)
+        dt = tz.localize(dt)
+    else:
+        dt = dt.replace(tzinfo=timezone.utc)
+    
+    return int(dt.timestamp())
+
+
+def from_unix_chinese(timestamp: Union[int, float], 
+                     format_type: str = 'full',
+                     use_era: Optional[str] = None,
+                     timezone_str: Optional[str] = None) -> str:
+    """
+    Convert Unix timestamp to Chinese date string.
+    
+    Args:
+        timestamp (int|float): Unix timestamp
+        format_type (str): Format type ('full', 'short', 'traditional')
+        use_era (str, optional): Era to use
+        timezone_str (str, optional): Timezone string
+        
+    Returns:
+        str: Chinese formatted date string
+        
+    Examples:
+        >>> from_unix_chinese(1609459200)
+        '二〇二一年一月一日'
+    """
+    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    
+    if timezone_str:
+        import pytz
+        tz = pytz.timezone(timezone_str)
+        dt = dt.astimezone(tz)
+    
+    return format_chinese_date(dt, format_type, use_era)
+
+
+def get_chinese_weekday(datetime_str: str, short: bool = False) -> str:
+    """
+    Get Chinese weekday name from datetime string.
+    
+    Args:
+        datetime_str (str): Datetime string
+        short (bool): Use short format (周一 vs 星期一)
+        
+    Returns:
+        str: Chinese weekday name
+        
+    Examples:
+        >>> get_chinese_weekday("2021-01-01")
+        '星期五'
+        >>> get_chinese_weekday("2021-01-01", short=True)
+        '周五'
+    """
+    dt = parser.parse(datetime_str)
+    weekday_num = dt.weekday()
+    
+    if short:
+        return CHINESE_WEEKDAYS_SHORT[weekday_num]
+    else:
+        return CHINESE_WEEKDAYS[weekday_num]
+
+
+def get_chinese_month(month_num: int) -> str:
+    """
+    Get Chinese month name from month number.
+    
+    Args:
+        month_num (int): Month number (1-12)
+        
+    Returns:
+        str: Chinese month name
+        
+    Examples:
+        >>> get_chinese_month(1)
+        '一月'
+        >>> get_chinese_month(12)
+        '十二月'
+    """
+    if month_num not in MONTH_NAMES_CHINESE:
+        raise ValueError(f"Invalid month number: {month_num}")
+    
+    return MONTH_NAMES_CHINESE[month_num]
+
+
+def convert_chinese_era(year: int, from_era: str, to_era: str) -> int:
+    """
+    Convert year between different Chinese eras.
+    
+    Args:
+        year (int): Year in source era
+        from_era (str): Source era ('民国', '公元', '西元')
+        to_era (str): Target era ('民国', '公元', '西元')
+        
+    Returns:
+        int: Year in target era
+        
+    Examples:
+        >>> convert_chinese_era(110, '民国', '公元')
+        2021
+        >>> convert_chinese_era(2021, '公元', '民国')
+        110
+    """
+    if from_era not in CHINESE_ERAS or to_era not in CHINESE_ERAS:
+        raise ValueError("Invalid era specified")
+    
+    # Convert to Common Era first
+    if from_era == '民国':
+        ce_year = year + 1911
+    else:  # 公元 or 西元
+        ce_year = year
+    
+    # Convert from Common Era to target
+    if to_era == '民国':
+        return ce_year - 1911
+    else:  # 公元 or 西元
+        return ce_year
+
+
+def is_valid_chinese_date(chinese_date_str: str) -> bool:
+    """
+    Check if a Chinese date string is valid.
+    
+    Args:
+        chinese_date_str (str): Chinese date string to validate
+        
+    Returns:
+        bool: True if valid Chinese date string
+        
+    Examples:
+        >>> is_valid_chinese_date("二〇二一年一月一日")
+        True
+        >>> is_valid_chinese_date("无效日期")
+        False
+    """
+    try:
+        parse_chinese_date(chinese_date_str)
+        return True
+    except (ValueError, TypeError):
+        return False

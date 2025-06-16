@@ -121,6 +121,51 @@ def main():
         except Exception as e:
             print(f"'{fmt}' -> Error: {e}")
     
+    # Chinese date support examples
+    print("\n🇨🇳 Chinese Date Support:")
+    
+    # Parse Chinese dates
+    chinese_dates = [
+        "二〇二一年一月一日",
+        "民国一一〇年三月十五日", 
+        "2021年12月31日",
+        "正月初一"
+    ]
+    
+    for chinese_date in chinese_dates:
+        try:
+            parsed = edt.parse_chinese_date(chinese_date)
+            print(f"parse_chinese_date('{chinese_date}'):")
+            print(f"  - Year: {parsed['year']}, Month: {parsed['month']}, Day: {parsed['day']}")
+            print(f"  - Weekday: {parsed['weekday_chinese']}")
+            if parsed['era']:
+                print(f"  - Era: {parsed['era']}")
+        except Exception as e:
+            print(f"'{chinese_date}' -> Error: {e}")
+    
+    # Format Chinese dates
+    print(f"\nformat_chinese_date('2021-01-01', 'full'): {edt.format_chinese_date('2021-01-01', 'full')}")
+    print(f"format_chinese_date('2021-01-01', 'short'): {edt.format_chinese_date('2021-01-01', 'short')}")
+    print(f"format_chinese_date('2021-01-01', use_era='民国'): {edt.format_chinese_date('2021-01-01', use_era='民国')}")
+    
+    # Chinese Unix conversion
+    print(f"\nto_unix_chinese('二〇二一年一月一日'): {edt.to_unix_chinese('二〇二一年一月一日')}")
+    print(f"from_unix_chinese(1609459200): {edt.from_unix_chinese(1609459200)}")
+    
+    # Chinese utilities
+    print(f"\nget_chinese_weekday('2021-01-01'): {edt.get_chinese_weekday('2021-01-01')}")
+    print(f"get_chinese_weekday('2021-01-01', short=True): {edt.get_chinese_weekday('2021-01-01', short=True)}")
+    print(f"get_chinese_month(1): {edt.get_chinese_month(1)}")
+    print(f"get_chinese_month(12): {edt.get_chinese_month(12)}")
+    
+    # Era conversion
+    print(f"\nconvert_chinese_era(110, '民国', '公元'): {edt.convert_chinese_era(110, '民国', '公元')}")
+    print(f"convert_chinese_era(2021, '公元', '民国'): {edt.convert_chinese_era(2021, '公元', '民国')}")
+    
+    # Validation
+    print(f"\nis_valid_chinese_date('二〇二一年一月一日'): {edt.is_valid_chinese_date('二〇二一年一月一日')}")
+    print(f"is_valid_chinese_date('无效日期'): {edt.is_valid_chinese_date('无效日期')}")
+
     print("\n✅ All examples completed successfully!")
     print("\n📚 For more information, see the README.md file or visit:")
     print("   https://github.com/lclalalalala/easy_datetime")

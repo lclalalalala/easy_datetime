@@ -18,6 +18,7 @@ A comprehensive Python package for datetime manipulation, conversion, and format
 - **📈 Date ranges** - Generate date sequences
 - **🔍 Validation** - Check if strings are valid datetime formats
 - **📆 Calendar utilities** - Weekdays, quarters, age calculation
+- **🇨🇳 Chinese date support** - Parse and format Chinese dates, era conversion
 - **⚡ High performance** - Optimized for speed and memory efficiency
 
 ## 📦 Installation
@@ -192,6 +193,54 @@ formatted = edt.format_datetime(
     input_timezone="UTC",
     output_timezone="Europe/London"
 )
+```
+
+### 🇨🇳 Chinese Date Support
+
+```python
+# Parse Chinese dates
+parsed = edt.parse_chinese_date("二〇二一年一月一日")
+print(parsed['year'])  # 2021
+print(parsed['weekday_chinese'])  # "星期五"
+
+# Parse with era (民国/Republic of China calendar)
+parsed = edt.parse_chinese_date("民国一一〇年三月十五日")
+print(parsed['year'])  # 2021 (民国110年 = 公元2021年)
+
+# Format as Chinese dates
+chinese = edt.format_chinese_date("2021-01-01", "full")
+print(chinese)  # "二〇二一年一月一日"
+
+chinese = edt.format_chinese_date("2021-01-01", use_era="民国")
+print(chinese)  # "民国一一〇年一月一日"
+
+# Chinese Unix conversion
+timestamp = edt.to_unix_chinese("二〇二一年一月一日")
+print(timestamp)  # 1609459200
+
+chinese_date = edt.from_unix_chinese(1609459200)
+print(chinese_date)  # "二〇二一年一月一日"
+
+# Chinese utilities
+weekday = edt.get_chinese_weekday("2021-01-01")
+print(weekday)  # "星期五"
+
+weekday_short = edt.get_chinese_weekday("2021-01-01", short=True)
+print(weekday_short)  # "周五"
+
+month = edt.get_chinese_month(1)
+print(month)  # "一月"
+
+# Era conversion
+year_ce = edt.convert_chinese_era(110, "民国", "公元")
+print(year_ce)  # 2021
+
+year_roc = edt.convert_chinese_era(2021, "公元", "民国")
+print(year_roc)  # 110
+
+# Validation
+is_valid = edt.is_valid_chinese_date("二〇二一年一月一日")
+print(is_valid)  # True
 ```
 
 ## 🧪 Testing
